@@ -53,7 +53,7 @@ def rx_irq(nrf: NRF24L01, feeder_backer: FeederBacker):
 
             status = nrf.read_status()
             if status & RX_DR:
-                nrf.reg_write(STATUS, RX_DR)  # clear interrupt
+                nrf.clear_irq()
 
                 while nrf.any():  # maybe more than one message stuck in the fifo
                     buf = nrf.recv()

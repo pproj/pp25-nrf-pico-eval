@@ -44,6 +44,15 @@ MAX_RT = const(0x10)  # max retransmits reached; write 1 to clear
 # FIFO_STATUS register
 RX_EMPTY = const(0x01)  # 1 if RX FIFO is empty
 
+# EN_AA register
+EN_AA = const(0x01)
+ENAA_P5 = const(0x20)
+ENAA_P4 = const(0x10)
+ENAA_P3 = const(0x08)
+ENAA_P2 = const(0x04)
+ENAA_P1 = const(0x02)
+ENAA_P0 = const(0x01)
+
 # constants for instructions
 R_RX_PL_WID = const(0x60)  # read RX payload width
 R_RX_PAYLOAD = const(0x61)  # read RX payload
@@ -103,6 +112,9 @@ class NRF24L01:
         self.flush_rx()
         self.flush_tx()
 
+        # enable aa
+        self.set_auto_ack(True)
+
     def init_spi(self, baudrate):
         try:
             master = self.spi.MASTER
@@ -150,6 +162,9 @@ class NRF24L01:
         self.spi.readinto(self.buf, FLUSH_TX)
         self.cs(1)
 
+    def clear_irq(self):
+        self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
+
     # power is one of POWER_x defines; speed is one of SPEED_x defines
     def set_power_speed(self, power, speed):
         setup = self.reg_read(RF_SETUP) & 0b11010001
@@ -168,6 +183,12 @@ class NRF24L01:
 
     def set_channel(self, channel):
         self.reg_write(RF_CH, min(channel, 125))
+
+    def set_auto_ack(self, auto_ack: bool):
+        if auto_ack:
+            self.reg_write(EN_AA, ENAA_P0)  # we use pipe0 only
+        else:
+            self.reg_write(EN_AA, 0x00)
 
     # address should be a bytes object 5 bytes long
     def open_tx_pipe(self, address):
@@ -193,7 +214,7 @@ class NRF24L01:
 
     def start_listening(self):
         self.reg_write(CONFIG, self.reg_read(CONFIG) | PWR_UP | PRIM_RX)
-        self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
+        self.clear_irq()
 
         if self.pipe0_read_addr is not None:
             self.reg_write_bytes(RX_ADDR_P0, self.pipe0_read_addr)
@@ -266,7 +287,7 @@ class NRF24L01:
             return None  # tx not finished
 
         # either finished or failed: get and clear status flags, power down
-        status = self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
+        self.clear_irq()
         self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)
         return 1 if status & TX_DS else 2
 
@@ -283,7 +304,7 @@ class NRF24L01:
         self.reg_write(RF_SETUP, self.reg_read(RF_SETUP) & ~(CONT_WAVE | PLL_LOCK))
 
         # clear flags
-        self.reg_write(STATUS, RX_DR | TX_DS | MAX_RT)
+        self.clear_irq()
 
         # power down
         self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)

@@ -103,27 +103,30 @@ def init_nrf(config: dict) -> NRF24L01:
     return nrf
 
 
-def parse_and_print_msg(msg: bytes):
+def parse_and_print_msg(msg: bytes) -> tuple[bool, bool, int]:  # preamble, last_fail, cnt
     global last_cnt
     if msg[:3] == b'abc':
         print("  PREAMBLE: OK")
     else:
         print("  PREAMBLE: FAIL")
-        return
+        return False, False, 0
 
     cnt = struct.unpack("<H", msg[3:5])[0]
     miss = cnt - last_cnt != 1
     last_cnt = cnt
+    last_fail = bool(msg[5])  # Note: True means failure!
 
     if miss:
         print("  CNT:", cnt, "!!!")
     else:
         print("  CNT:", cnt)
 
-    if msg[5]:
+    if last_fail:
         print("  LAST TX: FAIL")
     else:
         print("  LAST TX: OK")
+
+    return True, last_fail, cnt
 
 
 def message(counter: int, last_fail: bool) -> bytes:
@@ -158,10 +161,15 @@ def run_simple_tx(radio_conf: dict, tx_conf: dict, feeder_backer: FeederBacker):
 
     def callback(success: bool, err_msg: str):
         nonlocal last_fail
+        nonlocal feeder_backer
         last_fail = not success
         if success:
+            feeder_backer.led2.off()
+            feeder_backer.led3.on()
             print(" ACK: OK")
         else:
+            feeder_backer.led2.on()
+            feeder_backer.led3.off()
             print(f" ACK: FAIL ({err_msg})")
 
     try:
@@ -182,12 +190,29 @@ def run_simple_rx(radio_conf: dict, rx_conf: dict, feeder_backer: FeederBacker):
         print("Waiting for messages (POLL mode)")
         fun = rx_poll
 
+    _last_cnt = 0
     try:
         for msg in fun(nrf, feeder_backer):
             print("received message:")
             if bell:
                 print("\a", end="")
-            parse_and_print_msg(msg)
+            preamble_ok, last_fail, cnt = parse_and_print_msg(msg)
+
+            if last_fail or (not preamble_ok):
+                # indicate some failure
+                feeder_backer.led2.on()
+                feeder_backer.led3.off()
+            else:
+                # indicate success
+                feeder_backer.led2.off()
+                feeder_backer.led3.on()
+
+            if cnt != (_last_cnt + 1):
+                feeder_backer.led1.on()  # indicate some missing packets
+            else:
+                feeder_backer.led1.off()
+            _last_cnt = cnt
+
     finally:
         nrf.shutdown()
 
@@ -209,13 +234,24 @@ def unmodulated_carrier_tx(radio_conf: dict, feeder_backer: FeederBacker):
 
 def simple_carrier_rx(radio_conf: dict, feeder_backer: FeederBacker):
     nrf = init_nrf(radio_conf)
+    nrf.set_auto_ack(False)  # don't want to send ack
+    nrf.flush_rx()
     nrf.start_listening()
     last_state = False
     first = True
+    irq_pin = Pin(IRQ_PIN, pull=Pin.PULL_UP, mode=Pin.IN)
     print("Detecting carrier wave...")
     try:
         while True:
-            utime.sleep_us(500) # 0.5ms
+            utime.sleep_us(500)  # 0.5ms
+
+            # since we are in listening mode, we may receive messages as well, but we don't care now
+            if not irq_pin.value():  # irq would be on falling edge
+                # clear flags
+                nrf.flush_rx()
+                nrf.clear_irq()
+                feeder_backer.led1.on()
+
             state = nrf.detect_carrier()
             if last_state != state:
                 if state and first:
@@ -330,7 +366,12 @@ def probe_nrf(radio_conf: dict, feeder_backer: FeederBacker):
 
         # send with irq
         print("Testing IRQ...")
+        nrf.clear_irq()
         p = Pin(IRQ_PIN, pull=Pin.PULL_UP, mode=Pin.IN)
+
+        if not p.value():
+            raise Exception("IRQ pin stuck!")
+
         nrf.send_start(b"\x00\x01")
 
         # poll the irq pin for irq
@@ -381,11 +422,11 @@ def menu():
         try:
             fn(*args, **kwargs)
         except KeyboardInterrupt:
-            print("Interrupted. Hit return.")
+            print("\nInterrupted. Hit return.")
         except Exception as e:
-            print(f"Crashed: {str(e)}. Hit return.")
+            print(f"\nCrashed: {str(e)}. Hit return.")
         else:
-            print("Exited. Hit return.")
+            print("\nExited. Hit return.")
         input()
 
     def parse_channel(t: str, _: dict) -> int:
