@@ -10,24 +10,19 @@ IRQ_PIN = const(7)
 
 def rx_poll(nrf: NRF24L01, feeder_backer: FeederBacker):
     nrf.start_listening()
-    try:
 
-        while True:
-            if nrf.any():
-                while nrf.any():
-                    feeder_backer.led_activity.on()
-                    buf = nrf.recv()
-                    yield buf
+    while True:
+        if nrf.any():
+            while nrf.any():
+                feeder_backer.led_activity.on()
+                buf = nrf.recv()
+                yield buf
 
-                    utime.sleep_ms(const(15))  # why is this here?
-                    feeder_backer.led_activity.off()
+                utime.sleep_ms(const(15))  # why is this here?
+                feeder_backer.led_activity.off()
 
-                # Give master time to get into receive mode.
-                utime.sleep_ms(const(10))
-
-    finally:
-        nrf.shutdown()
-        feeder_backer.led_activity.off()
+            # Give master time to get into receive mode.
+            utime.sleep_ms(const(10))
 
 
 def rx_irq(nrf: NRF24L01, feeder_backer: FeederBacker):
@@ -64,8 +59,6 @@ def rx_irq(nrf: NRF24L01, feeder_backer: FeederBacker):
             feeder_backer.led_activity.off()
     finally:
         p.irq(None)
-        nrf.shutdown()
-        feeder_backer.led_activity.off()
 
 
 def tx_poll(nrf: NRF24L01, feeder_backer: FeederBacker, generator: callable, callback: callable = None):

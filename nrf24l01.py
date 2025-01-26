@@ -8,7 +8,6 @@ import utime
 CONFIG = const(0x00)
 EN_RXADDR = const(0x02)
 SETUP_AW = const(0x03)
-SETUP_RETR = const(0x04)
 RF_CH = const(0x05)
 RF_SETUP = const(0x06)
 STATUS = const(0x07)
@@ -18,6 +17,25 @@ TX_ADDR = const(0x10)
 RX_PW_P0 = const(0x11)
 FIFO_STATUS = const(0x17)
 DYNPD = const(0x1C)
+
+# SETUP_RETR register
+SETUP_RETR = const(0x04)
+ARD_250US = const(0x00)
+ARD_500US = const(0x10)
+ARD_750US = const(0x20)
+ARD_1000US = const(0x30)
+ARD_1250US = const(0x40)
+ARD_1500US = const(0x50)
+ARD_1750US = const(0x60)
+ARD_2000US = const(0x70)
+ARD_2250US = const(0x80)
+ARD_2500US = const(0x90)
+ARD_2750US = const(0xa0)
+ARD_3000US = const(0xb0)
+ARD_3250US = const(0xc0)
+ARD_3500US = const(0xd0)
+ARD_3750US = const(0xe0)
+ARD_4000US = const(0xf0)
 
 # CONFIG register
 EN_CRC = const(0x08)  # enable CRC
@@ -53,10 +71,17 @@ ENAA_P2 = const(0x04)
 ENAA_P1 = const(0x02)
 ENAA_P0 = const(0x01)
 
+# FEATURE register
+FEATURE = const(0x1d)
+EN_DPL = const(0x04)
+EN_ACK_PAY = const(0x02)
+EN_DYN_ACK = const(0x01)
+
 # constants for instructions
 R_RX_PL_WID = const(0x60)  # read RX payload width
 R_RX_PAYLOAD = const(0x61)  # read RX payload
 W_TX_PAYLOAD = const(0xA0)  # write TX payload
+W_TX_PAYLOAD_NOACK = const(0xB0)  # write TX payload
 FLUSH_TX = const(0xE1)  # flush TX FIFO
 FLUSH_RX = const(0xE2)  # flush RX FIFO
 NOP = const(0xFF)  # use to read STATUS register
@@ -74,7 +99,7 @@ class NRF24L01:
         self.ce = ce
 
         # init the SPI bus and pins
-        self.init_spi(4000000)
+        self._init_spi(4000000)
 
         # reset everything
         ce.init(ce.OUT, value=0)
@@ -94,7 +119,7 @@ class NRF24L01:
 
         # auto retransmit delay: 1750us
         # auto retransmit count: 8
-        self.reg_write(SETUP_RETR, (6 << 4) | 8)
+        self.setup_retr(ARD_1750US, 8)
 
         # set rf power and speed
         self.set_power_speed(POWER_3, SPEED_250K)  # Best for point to point links
@@ -115,13 +140,18 @@ class NRF24L01:
         # enable aa
         self.set_auto_ack(True)
 
-    def init_spi(self, baudrate):
+    def _init_spi(self, baudrate: int):
         try:
             master = self.spi.MASTER
         except AttributeError:
             self.spi.init(baudrate=baudrate, polarity=0, phase=0)
         else:
             self.spi.init(master, baudrate=baudrate, polarity=0, phase=0)
+
+    def setup_retr(self, delay: int, count: int):
+        assert 15 >= count >= 0
+        assert ARD_4000US >= count >= ARD_250US
+        self.reg_write(SETUP_RETR, delay | count)
 
     def reg_read(self, reg):
         self.cs(0)
@@ -186,7 +216,7 @@ class NRF24L01:
 
     def set_auto_ack(self, auto_ack: bool):
         if auto_ack:
-            self.reg_write(EN_AA, ENAA_P0)  # we use pipe0 only
+            self.reg_write(EN_AA, ENAA_P0 | ENAA_P1 | ENAA_P2 | ENAA_P3 | ENAA_P4 | ENAA_P5)  # enable for all pipes
         else:
             self.reg_write(EN_AA, 0x00)
 
@@ -263,10 +293,10 @@ class NRF24L01:
             raise OSError("send failed")
 
     # non-blocking tx
-    def send_start(self, buf):
+    def send_start(self, buf: bytes):
         # power up
         self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
-        utime.sleep_us(1500)  # needs to be 1.5ms
+        utime.sleep_us(2000)  # needs to be at least 1.5ms ... for some reason 1.5ms fails for small payloads ... weird
         # send the data
         self.cs(0)
         self.spi.readinto(self.buf, W_TX_PAYLOAD)
@@ -290,6 +320,34 @@ class NRF24L01:
         self.clear_irq()
         self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)
         return 1 if status & TX_DS else 2
+
+    def send_no_ack(self, buf: bytes):
+        # power up
+        self.reg_write(FEATURE, EN_DYN_ACK)  # enable noack packet
+        self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
+        utime.sleep_us(2000)  # needs to be at least 1.5ms ... for some reason 1.5ms fails for small payloads ... weird
+        # send the data
+        self.cs(0)
+        self.spi.readinto(self.buf, W_TX_PAYLOAD_NOACK)
+        self.spi.write(buf)
+        if len(buf) < self.payload_size:
+            self.spi.write(b"\x00" * (self.payload_size - len(buf)))  # pad out data
+        self.cs(1)
+
+        # enable the chip so it can send the data
+        self.ce(1)
+        utime.sleep_us(15)  # needs to be >10us
+        self.ce(0)
+
+        # wait for send to complete
+        while True:
+            utime.sleep_us(500)
+            status = self.read_status()
+            if status & TX_DS:  # when ACK is disabled, TX_DS is set unconditionally
+                break
+
+        self.clear_irq()
+        self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)  # power down
 
     # used for out-of-order shutdown
     def shutdown(self):
