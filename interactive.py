@@ -7,8 +7,10 @@ from micropython import const
 
 from machine import Pin, SPI
 
-from transfer import IRQ_PIN, tx_irq, tx_poll, rx_irq, rx_poll
-from rf_diag import channel_scan
+from const import IRQ_PIN
+
+from transfer import tx_irq, tx_poll, rx_irq, rx_poll
+from rf_diag import channel_scan, echo_test
 from pingpong import pingpong
 from hw_diag import led_test, interrupt_test
 
@@ -231,7 +233,6 @@ def unmodulated_carrier_tx(radio_conf: dict, feeder_backer: FeederBacker):
 
 
 def simple_carrier_rx(radio_conf: dict, feeder_backer: FeederBacker):
-
     # TODO: for some reason, receiving a valid packed locks this up in high state
     # Maybe data needs to be read?
 
@@ -350,6 +351,14 @@ def run_pingpong(radio_conf: dict, pingpong_config: dict, feeder_backer: FeederB
         nrf.shutdown()
 
 
+def run_echo_test(radio_conf: dict, feeder_backer: FeederBacker):
+    nrf = init_nrf(radio_conf)
+    try:
+        echo_test(nrf, feeder_backer)
+    finally:
+        nrf.shutdown()
+
+
 def probe_nrf(radio_conf: dict, feeder_backer: FeederBacker):
     feeder_backer.led_builtin.on()
     nrf = None
@@ -456,33 +465,6 @@ def menu():
     ACTION_OK = const(-1)
     ACTION_CANCEL = const(-2)
 
-    ACTION_CONFIG = const(1)
-    ACTION_PROBE = const(2)
-    ACTION_RX = const(3)
-    ACTION_TX = const(4)
-    ACTION_CR_TX_TEST = const(5)
-    ACTION_CR_RX_TEST = const(6)
-    ACTION_SCAN = const(7)
-    ACTION_PINGPONG = const(8)
-    ACTION_NPERF = const(9)
-    ACTION_IRQ_TEST = const(10)
-    ACTION_LED_TEST = const(11)
-
-    # main dialog
-    main_d = Dialog("Where do you want to go today?")
-    main_d.add_action("Configure radio", ACTION_CONFIG)
-    main_d.add_action("Probe radio device", ACTION_PROBE)
-    main_d.add_action("Run simple transmitter", ACTION_TX)
-    main_d.add_action("Run simple receiver", ACTION_RX)
-    main_d.add_action("Emit un-modulated carrier wave", ACTION_CR_TX_TEST)
-    main_d.add_action("Detect carrier wave", ACTION_CR_RX_TEST)
-    main_d.add_action("Scan channels for free airtime", ACTION_SCAN)
-    main_d.add_action("Run ping-pong", ACTION_PINGPONG)
-    main_d.add_action("Run nPerf", ACTION_NPERF)
-    main_d.add_action("Run IRQ test", ACTION_IRQ_TEST)
-    main_d.add_action("Run LED test", ACTION_LED_TEST)
-    main_d.add_action("Leave menu", ACTION_CANCEL)
-
     # radio config dialog
     config_d = Dialog("Radio config")
     config_d.add_input("Channel", CFG_RADIO_CHANNEL, parse_channel)
@@ -577,60 +559,74 @@ def menu():
             pingpong_config = new_pingpong_config
             protected_run(run_pingpong, radio_config, pingpong_config, feeder_backer)
 
-    applets = {
-        # action key, function, protected
+    applets = [
+        # name, function, protected
         (
-            ACTION_CONFIG, action_config, False
+            "Configure radio", action_config, False
         ),
         (
-            ACTION_PROBE, lambda: probe_nrf(radio_config, feeder_backer), True
+            "Probe radio device", lambda: probe_nrf(radio_config, feeder_backer), True
         ),
         (
-            ACTION_RX, action_rx, False
+            "Run simple receiver", action_rx, False
         ),
         (
-            ACTION_TX, action_tx, False
+            "Run simple transmitter", action_tx, False
         ),
         (
-            ACTION_CR_TX_TEST, lambda: unmodulated_carrier_tx(radio_config, feeder_backer), True
+            "Emit un-modulated carrier wave", lambda: unmodulated_carrier_tx(radio_config, feeder_backer), True
         ),
         (
-            ACTION_CR_RX_TEST, lambda: simple_carrier_rx(radio_config, feeder_backer), True
+            "Detect carrier wave", lambda: simple_carrier_rx(radio_config, feeder_backer), True
         ),
         (
-            ACTION_SCAN, action_scan, False
+            "Scan channels for free airtime", action_scan, False
         ),
         (
-            ACTION_PINGPONG, action_pingpong, False
+            "Run ping-pong", action_pingpong, False
         ),
         (
-            ACTION_NPERF, lambda: print("not implemented"), True
+            "Run nPerf", lambda: print("not implemented"), True
         ),
         (
-            ACTION_IRQ_TEST, lambda: interrupt_test(IRQ_PIN, feeder_backer), True
+            "Run echo test", lambda: run_echo_test(radio_config, feeder_backer), True
         ),
         (
-            ACTION_LED_TEST, lambda: led_test(feeder_backer), True
+            "Run IRQ test", lambda: interrupt_test(IRQ_PIN, feeder_backer), True
+        ),
+        (
+            "Run LED test", lambda: led_test(feeder_backer), True
         )
-    }
+    ]
+
+    # main dialog
+    main_d = Dialog("Where do you want to go today?")
+
+    for i, elm in enumerate(applets):
+        main_d.add_action(elm[0], i)
+
+    main_d.add_action("Leave menu", ACTION_CANCEL)
 
     while True:
         feeder_backer.reset()
         feeder_backer.led3.on()  # indicate menu
         result = main_d.present()
 
-        applet_found = False
-        for action_key, func, protect in applets:
-            feeder_backer.reset()
-            if action_key in result:
-                if protect:
-                    protected_run(func)
-                else:
-                    func()
-                applet_found = True
-
-        if not applet_found:
-            # no match, must be the only undefined key the exit key.
+        if len(result) == 0:
+            # nothing selected
             break
+
+        choice = list(result.keys())[0]
+
+        if choice == ACTION_CANCEL:
+            # user choose to exit
+            break
+
+        _, func, protect = applets[choice]
+        feeder_backer.reset()
+        if protect:
+            protected_run(func)
+        else:
+            func()
 
     feeder_backer.reset()

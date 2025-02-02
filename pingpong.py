@@ -11,13 +11,18 @@ STATE_SEND_WAIT_COMPLETE = const(3)
 STATE_PREPARING_RECV = const(4)
 STATE_RECV = const(5)
 
-IRQ_PIN = const(7)
+from const import IRQ_PIN
 
 DATA = b"PINGPONG"
 
-# TODO: For some reason after a while, both parties stuck in sending mode
-# Maybe one receives it's own message?
 
+# TODO: For some reason after a while, both parties stuck in sending mode
+# Maybe
+#  - the ACK packet gets lost?
+#  - brown out?
+# setting PA to min seems to ease the issue, but does not solve it...
+# sometimes they can both stuck in rx state... wtf
+# It seems like adding a sleep at a specific part kinda stabilizes it..... WTF?!?!?!
 
 def pingpong(nrf: NRF24L01, feedback: FeederBacker, has_serve: bool):
     # led1: rx
@@ -102,6 +107,7 @@ def pingpong(nrf: NRF24L01, feedback: FeederBacker, has_serve: bool):
 
         if state == STATE_RECV:
             if not p.value():  # irq
+                utime.sleep_us(400)  # maybe needs time to send ACK??? IT DOES!!! WTF?!!!!
                 status = nrf.read_status()
                 if status & RX_DR:
                     nrf.ce(0)  # stop listening

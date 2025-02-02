@@ -11,6 +11,8 @@ from machine import SPI, Pin
 
 from nrf24l01 import NRF24L01, POWER_0, SPEED_250K, RX_DR
 
+from const import IRQ_PIN
+
 ADDRESS = b'\xe1\xf0\xf0\xf0\xf0'
 CHANNEL = const(120)
 
@@ -33,7 +35,7 @@ def demo():
         feeder_backer.led1.off()
         utime.sleep_ms(150)
 
-    irq = Pin(7, mode=Pin.IN, pull=Pin.PULL_UP)
+    irq = Pin(IRQ_PIN, mode=Pin.IN, pull=Pin.PULL_UP)
     csn = Pin(14, mode=Pin.OUT, value=1)
     ce = Pin(13, mode=Pin.OUT, value=0)
     spidev = SPI(1, sck=Pin(10), mosi=Pin(15), miso=Pin(8))

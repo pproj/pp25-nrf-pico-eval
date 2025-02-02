@@ -5,7 +5,7 @@ import utime
 from feedback import FeederBacker
 from nrf24l01 import NRF24L01, RX_DR, CONFIG, PWR_UP
 
-IRQ_PIN = const(7)
+from const import IRQ_PIN
 
 
 def rx_poll(nrf: NRF24L01, feeder_backer: FeederBacker):
