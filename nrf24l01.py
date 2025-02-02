@@ -86,6 +86,9 @@ FLUSH_TX = const(0xE1)  # flush TX FIFO
 FLUSH_RX = const(0xE2)  # flush RX FIFO
 NOP = const(0xFF)  # use to read STATUS register
 
+MODE_PRIM_TX = const(1)
+MODE_PRIM_RX = const(2)
+
 
 class NRF24L01:
     def __init__(self, spi, cs, ce, channel=46, payload_size=16):
@@ -242,8 +245,17 @@ class NRF24L01:
         self.reg_write(RX_PW_P0 + pipe_id, self.payload_size)
         self.reg_write(EN_RXADDR, self.reg_read(EN_RXADDR) | (1 << pipe_id))
 
+    def power_up(self, mode: int):
+        if mode == MODE_PRIM_RX:
+            self.reg_write(CONFIG, self.reg_read(CONFIG) | PWR_UP | PRIM_RX)
+        elif mode == MODE_PRIM_TX:
+            self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
+        else:
+            raise Exception("nemjolet")
+        utime.sleep_us(2000)  # needs to be at least 1.5ms ... for some reason 1.5ms fails for small payloads ... weird
+
     def start_listening(self):
-        self.reg_write(CONFIG, self.reg_read(CONFIG) | PWR_UP | PRIM_RX)
+        self.power_up(MODE_PRIM_RX)
         self.clear_irq()
 
         if self.pipe0_read_addr is not None:
@@ -286,24 +298,27 @@ class NRF24L01:
 
         if result is None:
             # timed out, cancel sending and power down the module
-            self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)
+            self.shutdown()
             raise OSError("timed out")
 
         if result == 2:
             raise OSError("send failed")
 
-    # non-blocking tx
-    def send_start(self, buf: bytes):
-        # power up
-        self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
-        utime.sleep_us(2000)  # needs to be at least 1.5ms ... for some reason 1.5ms fails for small payloads ... weird
-        # send the data
+    # Puts a single message into the fifo
+    def put_tx_buf(self, buf: bytes):
         self.cs(0)
         self.spi.readinto(self.buf, W_TX_PAYLOAD)
         self.spi.write(buf)
         if len(buf) < self.payload_size:
             self.spi.write(b"\x00" * (self.payload_size - len(buf)))  # pad out data
         self.cs(1)
+
+    # non-blocking tx
+    def send_start(self, buf: bytes):
+        # power up
+        self.power_up(MODE_PRIM_TX)
+        # send the data
+        self.put_tx_buf(buf)
 
         # enable the chip so it can send the data
         self.ce(1)
@@ -317,15 +332,13 @@ class NRF24L01:
             return None  # tx not finished
 
         # either finished or failed: get and clear status flags, power down
-        self.clear_irq()
-        self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)
+        self.shutdown()
         return 1 if status & TX_DS else 2
 
     def send_no_ack(self, buf: bytes):
         # power up
         self.reg_write(FEATURE, EN_DYN_ACK)  # enable noack packet
-        self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
-        utime.sleep_us(2000)  # needs to be at least 1.5ms ... for some reason 1.5ms fails for small payloads ... weird
+        self.power_up(MODE_PRIM_TX)
         # send the data
         self.cs(0)
         self.spi.readinto(self.buf, W_TX_PAYLOAD_NOACK)
@@ -346,10 +359,9 @@ class NRF24L01:
             if status & TX_DS:  # when ACK is disabled, TX_DS is set unconditionally
                 break
 
-        self.clear_irq()
-        self.reg_write(CONFIG, self.reg_read(CONFIG) & ~PWR_UP)  # power down
+        self.shutdown()
 
-    # used for out-of-order shutdown
+    # can be used for out-of-order shutdown
     def shutdown(self):
         # assert CE low (or CSN... I'm getting confused... anyway it should stop sending)
         self.ce(0)
@@ -369,8 +381,7 @@ class NRF24L01:
 
     def start_constant_carrier_output(self):
         # power up
-        self.reg_write(CONFIG, (self.reg_read(CONFIG) | PWR_UP) & ~PRIM_RX)
-        utime.sleep_us(1500)  # needs to be 1.5ms
+        self.power_up(MODE_PRIM_TX)
 
         self.reg_write(RF_SETUP, self.reg_read(RF_SETUP) | CONT_WAVE | PLL_LOCK)  # preserves previous power setup
         # preserves previous channel setup

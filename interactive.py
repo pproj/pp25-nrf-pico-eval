@@ -9,7 +9,7 @@ from machine import Pin, SPI
 
 from transfer import IRQ_PIN, tx_irq, tx_poll, rx_irq, rx_poll
 from rf_diag import channel_scan
-
+from pingpong import pingpong
 from hw_diag import led_test, interrupt_test
 
 CFG_RADIO_CHANNEL = "c"
@@ -57,6 +57,12 @@ DEFAULT_SCAN_CONFIG = {
     CFG_SCAN_START: 0,
     CFG_SCAN_END: 125,
     CFG_SCAN_REPORT_STYLE: SCAN_REPORT_SIMPLE,
+}
+
+CFG_PINGPONG_HAS_SERVE = const(1)
+
+DEFAULT_PINGPONG_CONFIG = {
+    CFG_PINGPONG_HAS_SERVE: False
 }
 
 last_cnt = 0  # used by parse_and_print
@@ -225,6 +231,10 @@ def unmodulated_carrier_tx(radio_conf: dict, feeder_backer: FeederBacker):
 
 
 def simple_carrier_rx(radio_conf: dict, feeder_backer: FeederBacker):
+
+    # TODO: for some reason, receiving a valid packed locks this up in high state
+    # Maybe data needs to be read?
+
     nrf = init_nrf(radio_conf)
     nrf.set_auto_ack(False)  # don't want to send ack
     nrf.flush_rx()
@@ -330,6 +340,14 @@ def run_channel_scan(radio_conf: dict, scan_config: dict, feeder_backer: FeederB
     if scan_config[CFG_SCAN_REPORT_STYLE] == SCAN_REPORT_RAW:
         # lol
         print(results)
+
+
+def run_pingpong(radio_conf: dict, pingpong_config: dict, feeder_backer: FeederBacker):
+    nrf = init_nrf(radio_conf)
+    try:
+        pingpong(nrf, feeder_backer, pingpong_config[CFG_PINGPONG_HAS_SERVE])
+    finally:
+        nrf.shutdown()
 
 
 def probe_nrf(radio_conf: dict, feeder_backer: FeederBacker):
@@ -445,8 +463,10 @@ def menu():
     ACTION_CR_TX_TEST = const(5)
     ACTION_CR_RX_TEST = const(6)
     ACTION_SCAN = const(7)
-    ACTION_IRQ_TEST = const(8)
-    ACTION_LED_TEST = const(9)
+    ACTION_PINGPONG = const(8)
+    ACTION_NPERF = const(9)
+    ACTION_IRQ_TEST = const(10)
+    ACTION_LED_TEST = const(11)
 
     # main dialog
     main_d = Dialog("Where do you want to go today?")
@@ -457,6 +477,8 @@ def menu():
     main_d.add_action("Emit un-modulated carrier wave", ACTION_CR_TX_TEST)
     main_d.add_action("Detect carrier wave", ACTION_CR_RX_TEST)
     main_d.add_action("Scan channels for free airtime", ACTION_SCAN)
+    main_d.add_action("Run ping-pong", ACTION_PINGPONG)
+    main_d.add_action("Run nPerf", ACTION_NPERF)
     main_d.add_action("Run IRQ test", ACTION_IRQ_TEST)
     main_d.add_action("Run LED test", ACTION_LED_TEST)
     main_d.add_action("Leave menu", ACTION_CANCEL)
@@ -504,10 +526,17 @@ def menu():
     scan_d.add_action("Run", ACTION_OK)
     scan_d.add_action("Cancel", ACTION_CANCEL)
 
+    # pingpong dialog
+    pingpong_d = Dialog("Ping-pong")
+    pingpong_d.add_checkbox("Has serve", CFG_PINGPONG_HAS_SERVE)
+    pingpong_d.add_action("Run", ACTION_OK)
+    pingpong_d.add_action("Cancel", ACTION_CANCEL)
+
     radio_config = DEFAULT_RADIO_CONFIG.copy()
     rx_config = DEFAULT_RX_CONFIG.copy()
     tx_config = DEFAULT_TX_CONFIG.copy()
     scan_config = DEFAULT_SCAN_CONFIG.copy()
+    pingpong_config = DEFAULT_PINGPONG_CONFIG.copy()
 
     def action_config():
         nonlocal radio_config
@@ -540,6 +569,14 @@ def menu():
             scan_config = new_scan_config
             protected_run(run_channel_scan, radio_config, scan_config, feeder_backer)
 
+    def action_pingpong():
+        nonlocal pingpong_config
+        new_pingpong_config = pingpong_d.present(pingpong_config)
+        if ACTION_OK in new_pingpong_config:
+            del new_pingpong_config[ACTION_OK]
+            pingpong_config = new_pingpong_config
+            protected_run(run_pingpong, radio_config, pingpong_config, feeder_backer)
+
     applets = {
         # action key, function, protected
         (
@@ -562,6 +599,12 @@ def menu():
         ),
         (
             ACTION_SCAN, action_scan, False
+        ),
+        (
+            ACTION_PINGPONG, action_pingpong, False
+        ),
+        (
+            ACTION_NPERF, lambda: print("not implemented"), True
         ),
         (
             ACTION_IRQ_TEST, lambda: interrupt_test(IRQ_PIN, feeder_backer), True

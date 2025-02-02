@@ -3,7 +3,7 @@ from micropython import const
 import utime
 
 from feedback import FeederBacker
-from nrf24l01 import NRF24L01, RX_DR, STATUS, CONFIG, PWR_UP
+from nrf24l01 import NRF24L01, RX_DR, CONFIG, PWR_UP
 
 IRQ_PIN = const(7)
 
