@@ -153,7 +153,7 @@ class NRF24L01:
 
     def setup_retr(self, delay: int, count: int):
         assert 15 >= count >= 0
-        assert ARD_4000US >= count >= ARD_250US
+        assert ARD_4000US >= delay >= ARD_250US
         self.reg_write(SETUP_RETR, delay | count)
 
     def reg_read(self, reg):

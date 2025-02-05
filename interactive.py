@@ -27,8 +27,8 @@ DEFAULT_RADIO_CONFIG = {
     CFG_RADIO_SPEED: nrf24l01.SPEED_250K,
     CFG_RADIO_CRC: 1,
     CFG_RADIO_POWER: nrf24l01.POWER_3,
+    CFG_RADIO_RETR_DELAY: nrf24l01.ARD_1750US,
     CFG_RADIO_RETR_COUNT: 8,
-    CFG_RADIO_RETR_DELAY: nrf24l01.ARD_1750US
 }
 
 CFG_RX_BELL = const(1)
@@ -537,7 +537,7 @@ def menu():
         (nrf24l01.POWER_2, "HIGH (-6 dBm)"),
         (nrf24l01.POWER_3, "MAX (0 dBm)")
     ])
-    config_d.add_choice("ARD Delay", CFG_RADIO_RETR_DELAY, [
+    config_d.add_choice("Auto Retransmit Delay", CFG_RADIO_RETR_DELAY, [
         (nrf24l01.ARD_250US, "250us"),
         (nrf24l01.ARD_500US, "500us"),
         (nrf24l01.ARD_750US, "750us"),
@@ -555,7 +555,7 @@ def menu():
         (nrf24l01.ARD_3750US, "3750us"),
         (nrf24l01.ARD_4000US, "4000us"),
     ])
-    config_d.add_input("ARD Count", CFG_RADIO_RETR_COUNT, parse_ard_count)
+    config_d.add_input("Auto Retransmit Count", CFG_RADIO_RETR_COUNT, parse_ard_count)
     config_d.add_action("Save", ACTION_OK)
     config_d.add_action("Discard", ACTION_CANCEL)
 
