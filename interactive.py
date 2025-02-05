@@ -2,12 +2,13 @@ import ustruct as struct
 import utime
 
 from feedback import FeederBacker
-from nrf24l01 import NRF24L01, POWER_0, POWER_1, POWER_2, POWER_3, SPEED_250K, SPEED_2M, SPEED_1M, CONFIG, SETUP_AW
+import nrf24l01
 from micropython import const
 
 from machine import Pin, SPI
 
 from const import IRQ_PIN
+from nperf import nperf
 
 from transfer import tx_irq, tx_poll, rx_irq, rx_poll
 from rf_diag import channel_scan, echo_test
@@ -18,12 +19,16 @@ CFG_RADIO_CHANNEL = "c"
 CFG_RADIO_SPEED = "s"
 CFG_RADIO_CRC = "r"
 CFG_RADIO_POWER = "p"
+CFG_RADIO_RETR_COUNT = "t"
+CFG_RADIO_RETR_DELAY = "d"
 
 DEFAULT_RADIO_CONFIG = {
     CFG_RADIO_CHANNEL: 8,
-    CFG_RADIO_SPEED: SPEED_250K,
+    CFG_RADIO_SPEED: nrf24l01.SPEED_250K,
     CFG_RADIO_CRC: 1,
-    CFG_RADIO_POWER: POWER_3,
+    CFG_RADIO_POWER: nrf24l01.POWER_3,
+    CFG_RADIO_RETR_COUNT: 8,
+    CFG_RADIO_RETR_DELAY: nrf24l01.ARD_1750US
 }
 
 CFG_RX_BELL = const(1)
@@ -67,6 +72,15 @@ DEFAULT_PINGPONG_CONFIG = {
     CFG_PINGPONG_HAS_SERVE: False
 }
 
+CFG_NPERF_DIRECTION = const(1)
+
+CFG_NPERF_DIRECTION_SEND = const(1)
+CFG_NPERF_DIRECTION_RECV = const(2)
+
+DEFAULT_NPERF_CONFIG = {
+    CFG_NPERF_DIRECTION: CFG_NPERF_DIRECTION_SEND
+}
+
 last_cnt = 0  # used by parse_and_print
 
 # Addresses are in little-endian format. They correspond to big-endian
@@ -78,11 +92,37 @@ PAYLOAD_SIZE = const(16)
 def print_radio_config(config: dict):
     print("  Channel:", config[CFG_RADIO_CHANNEL])
     print("  CRC:", {0: "off", 1: "8bit", 2: "16bit"}[config[CFG_RADIO_CRC]])
-    print("  Speed:", {SPEED_250K: "250K", SPEED_1M: "1M", SPEED_2M: "2M"}[config[CFG_RADIO_SPEED]])
-    print("  Power:", {POWER_0: "MIN", POWER_1: "LOW", POWER_2: "HIGH", POWER_3: "MAX"}[config[CFG_RADIO_POWER]])
+    print("  Speed:",
+          {nrf24l01.SPEED_250K: "250K", nrf24l01.SPEED_1M: "1M", nrf24l01.SPEED_2M: "2M"}[config[CFG_RADIO_SPEED]])
+    print("  Power:",
+          {nrf24l01.POWER_0: "MIN", nrf24l01.POWER_1: "LOW", nrf24l01.POWER_2: "HIGH", nrf24l01.POWER_3: "MAX"}[
+              config[CFG_RADIO_POWER]])
+    if config[CFG_RADIO_RETR_COUNT] == 0:
+        print("  Retransmit: off")
+    else:
+        print("  Retransmit: ", config[CFG_RADIO_RETR_COUNT])
+        delay_strings = {
+            nrf24l01.ARD_250US: "250us",
+            nrf24l01.ARD_500US: "500us",
+            nrf24l01.ARD_750US: "750us",
+            nrf24l01.ARD_1000US: "1000us",
+            nrf24l01.ARD_1250US: "1250us",
+            nrf24l01.ARD_1500US: "1500us",
+            nrf24l01.ARD_1750US: "1750us",
+            nrf24l01.ARD_2000US: "2000us",
+            nrf24l01.ARD_2250US: "2250us",
+            nrf24l01.ARD_2500US: "2500us",
+            nrf24l01.ARD_2750US: "2750us",
+            nrf24l01.ARD_3000US: "3000us",
+            nrf24l01.ARD_3250US: "3250us",
+            nrf24l01.ARD_3500US: "3500us",
+            nrf24l01.ARD_3750US: "3750us",
+            nrf24l01.ARD_4000US: "4000us",
+        }
+        print("  Retransmit delay:", delay_strings[config[CFG_RADIO_RETR_DELAY]])
 
 
-def init_nrf(config: dict) -> NRF24L01:
+def init_nrf(config: dict) -> nrf24l01.NRF24L01:
     print(" == nrf init ==")
     csn = Pin(14, mode=Pin.OUT, value=1)
     ce = Pin(13, mode=Pin.OUT, value=0)
@@ -93,9 +133,14 @@ def init_nrf(config: dict) -> NRF24L01:
     print("radio config:")
     print_radio_config(config)
 
-    nrf = NRF24L01(spidev, csn, ce, payload_size=PAYLOAD_SIZE, channel=config.get(CFG_RADIO_CHANNEL, SPEED_250K))
-    nrf.set_power_speed(config.get(CFG_RADIO_POWER, POWER_3), config.get(CFG_RADIO_SPEED, SPEED_250K))
-    nrf.set_crc(config.get(CFG_RADIO_CRC, 1))
+    nrf = nrf24l01.NRF24L01(spidev, csn, ce,
+                            payload_size=PAYLOAD_SIZE,
+                            channel=config[CFG_RADIO_CHANNEL]
+                            )
+
+    nrf.set_power_speed(config[CFG_RADIO_POWER], config[CFG_RADIO_SPEED])
+    nrf.set_crc(config[CFG_RADIO_CRC])
+    nrf.setup_retr(config[CFG_RADIO_RETR_DELAY], config[CFG_RADIO_RETR_COUNT])
     nrf.open_tx_pipe(PIPE_ADDRESSES[1])
     nrf.open_rx_pipe(1, PIPE_ADDRESSES[0])
 
@@ -351,6 +396,14 @@ def run_pingpong(radio_conf: dict, pingpong_config: dict, feeder_backer: FeederB
         nrf.shutdown()
 
 
+def run_nperf(radio_conf: dict, nperf_config: dict, feeder_backer: FeederBacker):
+    nrf = init_nrf(radio_conf)
+    try:
+        nperf(nrf, feeder_backer)
+    finally:
+        nrf.shutdown()
+
+
 def run_echo_test(radio_conf: dict, feeder_backer: FeederBacker):
     nrf = init_nrf(radio_conf)
     try:
@@ -374,9 +427,9 @@ def probe_nrf(radio_conf: dict, feeder_backer: FeederBacker):
 
         # read a register
         print("Reading some registers...")  # to test communication
-        conf = nrf.reg_read(CONFIG)
+        conf = nrf.reg_read(nrf24l01.CONFIG)
         print(f"  CONFIG: {hex(conf)}")
-        aw = nrf.reg_read(SETUP_AW)
+        aw = nrf.reg_read(nrf24l01.SETUP_AW)
         print(f"  SETUP_AW: {hex(aw)}")
         if aw == 0x00:
             raise Exception("0x00 is illegal for SETUP_AW")
@@ -455,6 +508,13 @@ def menu():
         else:
             raise Exception("invalid channel")
 
+    def parse_ard_count(t: str, _: dict) -> int:
+        rtint = int(t)
+        if 0 <= rtint <= 15:
+            return rtint
+        else:
+            raise Exception("invalid count")
+
     def parse_positive_number(t: str, _: dict) -> int:
         i = int(t)
         if i > 0:
@@ -468,14 +528,34 @@ def menu():
     # radio config dialog
     config_d = Dialog("Radio config")
     config_d.add_input("Channel", CFG_RADIO_CHANNEL, parse_channel)
-    config_d.add_choice("Speed", CFG_RADIO_SPEED, [(SPEED_250K, "256K"), (SPEED_1M, "1M"), (SPEED_2M, "2M")])
+    config_d.add_choice("Speed", CFG_RADIO_SPEED,
+                        [(nrf24l01.SPEED_250K, "256K"), (nrf24l01.SPEED_1M, "1M"), (nrf24l01.SPEED_2M, "2M")])
     config_d.add_choice("CRC", CFG_RADIO_CRC, [(0, "off"), (1, "8bit"), (2, "16bit")])
     config_d.add_choice("Power", CFG_RADIO_POWER, [
-        (POWER_0, "MIN (-18 dBm)"),
-        (POWER_1, "LOW (-12 dBm)"),
-        (POWER_2, "HIGH (-6 dBm)"),
-        (POWER_3, "MAX (0 dBm)")
+        (nrf24l01.POWER_0, "MIN (-18 dBm)"),
+        (nrf24l01.POWER_1, "LOW (-12 dBm)"),
+        (nrf24l01.POWER_2, "HIGH (-6 dBm)"),
+        (nrf24l01.POWER_3, "MAX (0 dBm)")
     ])
+    config_d.add_choice("ARD Delay", CFG_RADIO_RETR_DELAY, [
+        (nrf24l01.ARD_250US, "250us"),
+        (nrf24l01.ARD_500US, "500us"),
+        (nrf24l01.ARD_750US, "750us"),
+        (nrf24l01.ARD_1000US, "1000us"),
+        (nrf24l01.ARD_1250US, "1250us"),
+        (nrf24l01.ARD_1500US, "1500us"),
+        (nrf24l01.ARD_1750US, "1750us"),
+        (nrf24l01.ARD_2000US, "2000us"),
+        (nrf24l01.ARD_2250US, "2250us"),
+        (nrf24l01.ARD_2500US, "2500us"),
+        (nrf24l01.ARD_2750US, "2750us"),
+        (nrf24l01.ARD_3000US, "3000us"),
+        (nrf24l01.ARD_3250US, "3250us"),
+        (nrf24l01.ARD_3500US, "3500us"),
+        (nrf24l01.ARD_3750US, "3750us"),
+        (nrf24l01.ARD_4000US, "4000us"),
+    ])
+    config_d.add_input("ARD Count", CFG_RADIO_RETR_COUNT, parse_ard_count)
     config_d.add_action("Save", ACTION_OK)
     config_d.add_action("Discard", ACTION_CANCEL)
 
@@ -514,11 +594,19 @@ def menu():
     pingpong_d.add_action("Run", ACTION_OK)
     pingpong_d.add_action("Cancel", ACTION_CANCEL)
 
+    # nperf dialog
+    nperf_d = Dialog("nPerf")
+    nperf_d.add_choice("Direction", CFG_NPERF_DIRECTION,
+                       [(CFG_NPERF_DIRECTION_SEND, "send"), (CFG_NPERF_DIRECTION_RECV, "recv")])
+    nperf_d.add_action("Run", ACTION_OK)
+    nperf_d.add_action("Cancel", ACTION_CANCEL)
+
     radio_config = DEFAULT_RADIO_CONFIG.copy()
     rx_config = DEFAULT_RX_CONFIG.copy()
     tx_config = DEFAULT_TX_CONFIG.copy()
     scan_config = DEFAULT_SCAN_CONFIG.copy()
     pingpong_config = DEFAULT_PINGPONG_CONFIG.copy()
+    nperf_config = DEFAULT_NPERF_CONFIG.copy()
 
     def action_config():
         nonlocal radio_config
@@ -559,13 +647,21 @@ def menu():
             pingpong_config = new_pingpong_config
             protected_run(run_pingpong, radio_config, pingpong_config, feeder_backer)
 
+    def action_nperf():
+        nonlocal nperf_config
+        new_nperf_config = nperf_d.present(nperf_config)
+        if ACTION_OK in nperf_config:
+            del nperf_config[ACTION_OK]
+            nperf_config = new_nperf_config
+            protected_run(run_nperf, radio_config, nperf_config, feeder_backer)
+
     applets = [
         # name, function, protected
         (
             "Configure radio", action_config, False
         ),
         (
-            "Probe radio device", lambda: probe_nrf(radio_config, feeder_backer), True
+            "Probe nRF device", lambda: probe_nrf(radio_config, feeder_backer), True
         ),
         (
             "Run simple receiver", action_rx, False
@@ -586,7 +682,7 @@ def menu():
             "Run ping-pong", action_pingpong, False
         ),
         (
-            "Run nPerf", lambda: print("not implemented"), True
+            "Run nPerf", action_nperf, False
         ),
         (
             "Run echo test", lambda: run_echo_test(radio_config, feeder_backer), True
