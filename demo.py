@@ -14,7 +14,10 @@ from nrf24l01 import NRF24L01, POWER_0, SPEED_250K, RX_DR
 from const import IRQ_PIN
 
 ADDRESS = b'\xe1\xf0\xf0\xf0\xf0'
-CHANNEL = const(120)
+CHANNEL = const(6)
+
+# TODO: News flash! For some reason this is broken now \o/
+# It does not work with the non-pa modules
 
 
 def display_byte(feeder_backer: FeederBacker, data: int):
@@ -41,7 +44,7 @@ def demo():
     spidev = SPI(1, sck=Pin(10), mosi=Pin(15), miso=Pin(8))
     nrf = NRF24L01(spidev, csn, ce, payload_size=1, channel=CHANNEL)
     nrf.set_power_speed(POWER_0, SPEED_250K)
-    nrf.set_crc(2)
+    nrf.set_crc(2)  # 16 bit
     nrf.open_tx_pipe(ADDRESS)  # using the same for tx and rx
     nrf.open_rx_pipe(0, ADDRESS)
     nrf.set_auto_ack(False)

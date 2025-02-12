@@ -1,3 +1,4 @@
+import sys
 import ustruct as struct
 import utime
 
@@ -8,7 +9,7 @@ from micropython import const
 from machine import Pin, SPI
 
 from const import IRQ_PIN
-from nperf import nperf
+from nperf import nperf, DIRECTION_RX, DIRECTION_TX
 
 from transfer import tx_irq, tx_poll, rx_irq, rx_poll
 from rf_diag import channel_scan, echo_test
@@ -62,7 +63,7 @@ DEFAULT_SCAN_CONFIG = {
     CFG_SCAN_ITERATIONS: 500,  # 5s
     CFG_SCAN_INTERVAL: 10,
     CFG_SCAN_START: 0,
-    CFG_SCAN_END: 125,
+    CFG_SCAN_END: 84,
     CFG_SCAN_REPORT_STYLE: SCAN_REPORT_SIMPLE,
 }
 
@@ -74,11 +75,8 @@ DEFAULT_PINGPONG_CONFIG = {
 
 CFG_NPERF_DIRECTION = const(1)
 
-CFG_NPERF_DIRECTION_SEND = const(1)
-CFG_NPERF_DIRECTION_RECV = const(2)
-
 DEFAULT_NPERF_CONFIG = {
-    CFG_NPERF_DIRECTION: CFG_NPERF_DIRECTION_SEND
+    CFG_NPERF_DIRECTION: DIRECTION_RX,
 }
 
 last_cnt = 0  # used by parse_and_print
@@ -216,6 +214,9 @@ def run_simple_tx(radio_conf: dict, tx_conf: dict, feeder_backer: FeederBacker):
             feeder_backer.led2.on()
             feeder_backer.led3.off()
             print(f" ACK: FAIL ({err_msg})")
+
+        lost_packets, retr_count = nrf.observe_tx()
+        print(f" Retransmissions: {retr_count}")
 
     try:
         fun(nrf, feeder_backer, generator, callback)
@@ -399,7 +400,7 @@ def run_pingpong(radio_conf: dict, pingpong_config: dict, feeder_backer: FeederB
 def run_nperf(radio_conf: dict, nperf_config: dict, feeder_backer: FeederBacker):
     nrf = init_nrf(radio_conf)
     try:
-        nperf(nrf, feeder_backer)
+        nperf(nrf, feeder_backer, nperf_config[CFG_NPERF_DIRECTION])
     finally:
         nrf.shutdown()
 
@@ -493,9 +494,11 @@ def menu():
     def protected_run(fn: callable, *args, **kwargs):
         try:
             fn(*args, **kwargs)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            sys.print_exception(e)
             print("\nInterrupted. Hit return.")
         except Exception as e:
+            sys.print_exception(e)
             print(f"\nCrashed: {str(e)}. Hit return.")
         else:
             print("\nExited. Hit return.")
@@ -596,8 +599,10 @@ def menu():
 
     # nperf dialog
     nperf_d = Dialog("nPerf")
-    nperf_d.add_choice("Direction", CFG_NPERF_DIRECTION,
-                       [(CFG_NPERF_DIRECTION_SEND, "send"), (CFG_NPERF_DIRECTION_RECV, "recv")])
+    nperf_d.add_choice("Direction", CFG_NPERF_DIRECTION, [
+        (DIRECTION_TX, "send"),
+        (DIRECTION_RX, "recv")
+    ])
     nperf_d.add_action("Run", ACTION_OK)
     nperf_d.add_action("Cancel", ACTION_CANCEL)
 
@@ -650,8 +655,8 @@ def menu():
     def action_nperf():
         nonlocal nperf_config
         new_nperf_config = nperf_d.present(nperf_config)
-        if ACTION_OK in nperf_config:
-            del nperf_config[ACTION_OK]
+        if ACTION_OK in new_nperf_config:
+            del new_nperf_config[ACTION_OK]
             nperf_config = new_nperf_config
             protected_run(run_nperf, radio_config, nperf_config, feeder_backer)
 

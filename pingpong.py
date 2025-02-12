@@ -5,13 +5,13 @@ from feedback import FeederBacker
 from nrf24l01 import NRF24L01, MODE_PRIM_TX, CONFIG, PRIM_RX, PWR_UP, RX_DR, TX_DS, MAX_RT
 from machine import Pin
 
+from const import IRQ_PIN
+
 STATE_PREPARING_SEND = const(1)
 STATE_SEND = const(2)
 STATE_SEND_WAIT_COMPLETE = const(3)
 STATE_PREPARING_RECV = const(4)
 STATE_RECV = const(5)
-
-from const import IRQ_PIN
 
 DATA = b"PINGPONG"
 

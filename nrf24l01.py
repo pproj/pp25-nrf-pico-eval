@@ -11,6 +11,7 @@ SETUP_AW = const(0x03)
 RF_CH = const(0x05)
 RF_SETUP = const(0x06)
 STATUS = const(0x07)
+OBSERVE_TX = const(0x08)
 RPD = const(0x09)
 RX_ADDR_P0 = const(0x0A)
 TX_ADDR = const(0x10)
@@ -184,6 +185,13 @@ class NRF24L01:
         self.spi.readinto(self.buf, NOP)
         self.cs(1)
         return self.buf[0]
+
+    def observe_tx(self) -> tuple[int, int]:
+        # TODO: this does not work...
+        val = self.reg_read(OBSERVE_TX)
+        plos_cnt = (val & 0xf8) >> 4
+        arc_cnt = val & 0x07
+        return plos_cnt, arc_cnt
 
     def flush_rx(self):
         self.cs(0)
