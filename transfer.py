@@ -3,7 +3,7 @@ from micropython import const
 import utime
 
 from feedback import FeederBacker
-from nrf24l01 import NRF24L01, RX_DR, CONFIG, PWR_UP
+from nrf24l01 import NRF24L01, RX_DR, CONFIG, PWR_UP, HWError, NOACKError
 
 from const import IRQ_PIN
 
@@ -68,16 +68,22 @@ def tx_poll(nrf: NRF24L01, feeder_backer: FeederBacker, generator: callable, cal
         feeder_backer.led_activity.on()
 
         success = True
+        ack_fail = False
         err_msg = ""
         try:
             nrf.send(msg, timeout=50)
-        except OSError as e:
+        except HWError as e:
+            success = False
+            ack_fail = True
+            err_msg = str(e)
+
+        except NOACKError as e:
             success = False
             err_msg = str(e)
 
         stop = False  # will be none by default
         if callback:
-            stop = callback(success, err_msg)
+            stop = callback(success, ack_fail, err_msg)
 
         feeder_backer.led_activity.off()
 
@@ -110,6 +116,7 @@ def tx_irq(nrf: NRF24L01, feeder_backer: FeederBacker, generator: callable, call
                 timed_out = utime.ticks_diff(utime.ticks_ms(), start) > 100  # time out after 100ms
 
             success = True
+            ack_fail = False
             err_msg = ""
 
             if timed_out:  # timed out
@@ -117,7 +124,7 @@ def tx_irq(nrf: NRF24L01, feeder_backer: FeederBacker, generator: callable, call
                 nrf.reg_write(CONFIG, nrf.reg_read(CONFIG) & ~PWR_UP)  # power down
 
                 success = False
-                err_msg = "timed out"
+                err_msg = str(HWError())
 
             elif flag:  # hw signaled... something
                 flag = False
@@ -126,13 +133,14 @@ def tx_irq(nrf: NRF24L01, feeder_backer: FeederBacker, generator: callable, call
                 if result == 2:
                     nrf.flush_tx()  # cancel
                     success = False
-                    err_msg = "send failed"
+                    ack_fail = True
+                    err_msg = str(NOACKError())
             else:
                 raise Exception("something wrong")
 
             stop = False  # will be none by default
             if callback:
-                stop = callback(success, err_msg)
+                stop = callback(success, ack_fail, err_msg)
 
             feeder_backer.led_activity.off()
 

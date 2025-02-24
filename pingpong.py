@@ -24,7 +24,7 @@ DATA = b"PINGPONG"
 # sometimes they can both stuck in rx state... wtf
 # It seems like adding a sleep at a specific part kinda stabilizes it..... WTF?!?!?!
 
-def pingpong(nrf: NRF24L01, feedback: FeederBacker, has_serve: bool):
+def pingpong(nrf: NRF24L01, feedback: FeederBacker, has_serve: bool, delay_us: int):
     # led1: rx
     # led2: tx
     # led3: problem
@@ -107,7 +107,7 @@ def pingpong(nrf: NRF24L01, feedback: FeederBacker, has_serve: bool):
 
         if state == STATE_RECV:
             if not p.value():  # irq
-                utime.sleep_us(400)  # maybe needs time to send ACK??? IT DOES!!! WTF?!!!!
+                utime.sleep_us(delay_us)  # maybe needs time to send ACK??? IT DOES!!! WTF?!!!!
                 status = nrf.read_status()
                 if status & RX_DR:
                     nrf.ce(0)  # stop listening

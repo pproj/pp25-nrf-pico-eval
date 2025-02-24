@@ -91,6 +91,26 @@ MODE_PRIM_TX = const(1)
 MODE_PRIM_RX = const(2)
 
 
+class TransmitError(Exception):
+    pass
+
+
+class NOACKError(TransmitError):
+    """
+    Exception raised when no ACK received
+    """
+    def __str__(self):
+        return "no ack"
+
+
+class HWError(TransmitError):
+    """
+    Raised when the hardware is supposedly misbehaving
+    """
+    def __str__(self):
+        return "hw error"
+
+
 class NRF24L01:
     def __init__(self, spi, cs, ce, channel=46, payload_size=16):
         assert payload_size <= 32
@@ -307,10 +327,10 @@ class NRF24L01:
         if result is None:
             # timed out, cancel sending and power down the module
             self.shutdown()
-            raise OSError("timed out")
+            raise HWError()
 
         if result == 2:
-            raise OSError("send failed")
+            raise NOACKError()
 
     # Puts a single message into the fifo
     def put_tx_buf(self, buf: bytes):

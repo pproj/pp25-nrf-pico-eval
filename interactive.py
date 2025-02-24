@@ -68,9 +68,11 @@ DEFAULT_SCAN_CONFIG = {
 }
 
 CFG_PINGPONG_HAS_SERVE = const(1)
+CFG_PINGPONG_DELAY_US = const(2)
 
 DEFAULT_PINGPONG_CONFIG = {
-    CFG_PINGPONG_HAS_SERVE: False
+    CFG_PINGPONG_HAS_SERVE: False,
+    CFG_PINGPONG_DELAY_US: 400
 }
 
 CFG_NPERF_DIRECTION = const(1)
@@ -79,7 +81,9 @@ DEFAULT_NPERF_CONFIG = {
     CFG_NPERF_DIRECTION: DIRECTION_RX,
 }
 
-last_cnt = 0  # used by parse_and_print
+LAST_STATUS_OK = const(0)
+LAST_STATUS_HW_FAIL = const(1)
+LAST_STATUS_NO_ACK = const(2)
 
 # Addresses are in little-endian format. They correspond to big-endian
 PIPE_ADDRESSES = (b'\xe1\xf0\xf0\xf0\xf0', b'\xd2\xf0\xf0\xf0\xf0')
@@ -146,34 +150,40 @@ def init_nrf(config: dict) -> nrf24l01.NRF24L01:
     return nrf
 
 
-def parse_and_print_msg(msg: bytes) -> tuple[bool, bool, int]:  # preamble, last_fail, cnt
+last_cnt = 0  # used by parse_and_print
+
+
+def parse_and_print_msg(msg: bytes) -> tuple[bool, int, bool, int, int]:  # preamble, cnt, miss, last_status, last_retr
     global last_cnt
     if msg[:3] == b'abc':
         print("  PREAMBLE: OK")
     else:
         print("  PREAMBLE: FAIL")
-        return False, False, 0
+        return False, 0, False, 255, 0
 
-    cnt = struct.unpack("<H", msg[3:5])[0]
+    cnt, last_status, last_retr = struct.unpack("<LBB", msg[3:9])
     miss = cnt - last_cnt != 1
     last_cnt = cnt
-    last_fail = bool(msg[5])  # Note: True means failure!
 
     if miss:
         print("  CNT:", cnt, "!!!")
     else:
         print("  CNT:", cnt)
 
-    if last_fail:
-        print("  LAST TX: FAIL")
+    if last_status == LAST_STATUS_OK:
+        print(f"  LAST TX: OK (retr: {last_retr})")
+    elif last_status == LAST_STATUS_HW_FAIL:
+        print("  LAST TX: HW FAIL")
+    elif last_status == LAST_STATUS_NO_ACK:
+        print("  LAST TX: NO ACK")
     else:
-        print("  LAST TX: OK")
+        print("  LAST TX: ???")
 
-    return True, last_fail, cnt
+    return True, cnt, miss, last_status, last_retr
 
 
-def message(counter: int, last_fail: bool) -> bytes:
-    return b'abc' + struct.pack("<H", counter) + (b'\x01' if last_fail else b'\x00')
+def message(counter: int, last_status: int, last_retr: int) -> bytes:
+    return b'abc' + struct.pack("<LBB", counter, last_status, last_retr)
 
 
 def run_simple_tx(radio_conf: dict, tx_conf: dict, feeder_backer: FeederBacker):
@@ -189,34 +199,43 @@ def run_simple_tx(radio_conf: dict, tx_conf: dict, feeder_backer: FeederBacker):
         fun = tx_poll
 
     counter = 0
-    last_fail = False
+    last_status = LAST_STATUS_OK  # 0 = ok, 1 = hw err, 2 = no ack
+    last_retr = 0
 
     def generator():
         nonlocal counter
-        nonlocal last_fail
+        nonlocal last_status
+        nonlocal last_retr
         while True:
-            msg = message(counter, last_fail)
+            msg = message(counter, last_status, last_retr)
             counter += 1
             print("sending message:")
             parse_and_print_msg(msg)
             yield msg
             utime.sleep_ms(interval)
 
-    def callback(success: bool, err_msg: str):
-        nonlocal last_fail
+    def callback(success: bool, ack_fail: bool, err_msg: str):
+        nonlocal last_status
+        nonlocal last_retr
         nonlocal feeder_backer
-        last_fail = not success
         if success:
             feeder_backer.led2.off()
             feeder_backer.led3.on()
-            print(" ACK: OK")
+            _, retr_count = nrf.observe_tx()
+            print(f" SEND: OK (retr: {retr_count})")
+            last_retr = retr_count
+            last_status = LAST_STATUS_OK
         else:
             feeder_backer.led2.on()
             feeder_backer.led3.off()
-            print(f" ACK: FAIL ({err_msg})")
-
-        lost_packets, retr_count = nrf.observe_tx()
-        print(f" Retransmissions: {retr_count}")
+            if ack_fail:
+                print(f" SEND: FAIL? ({err_msg})")
+                last_retr = 0  # retr_count will always be zero in this case... I don't really get why
+                last_status = LAST_STATUS_NO_ACK
+            else:
+                print(f" SEND: FAIL ({err_msg})")
+                last_retr = 0
+                last_status = LAST_STATUS_NO_ACK
 
     try:
         fun(nrf, feeder_backer, generator, callback)
@@ -236,15 +255,14 @@ def run_simple_rx(radio_conf: dict, rx_conf: dict, feeder_backer: FeederBacker):
         print("Waiting for messages (POLL mode)")
         fun = rx_poll
 
-    _last_cnt = 0
     try:
         for msg in fun(nrf, feeder_backer):
             print("received message:")
             if bell:
                 print("\a", end="")
-            preamble_ok, last_fail, cnt = parse_and_print_msg(msg)
+            preamble_ok, cnt, miss, last_status, last_retr = parse_and_print_msg(msg)
 
-            if last_fail or (not preamble_ok):
+            if (last_status != LAST_STATUS_OK) or (not preamble_ok):
                 # indicate some failure
                 feeder_backer.led2.on()
                 feeder_backer.led3.off()
@@ -253,11 +271,10 @@ def run_simple_rx(radio_conf: dict, rx_conf: dict, feeder_backer: FeederBacker):
                 feeder_backer.led2.off()
                 feeder_backer.led3.on()
 
-            if cnt != (_last_cnt + 1):
+            if miss:
                 feeder_backer.led1.on()  # indicate some missing packets
             else:
                 feeder_backer.led1.off()
-            _last_cnt = cnt
 
     finally:
         nrf.shutdown()
@@ -390,9 +407,11 @@ def run_channel_scan(radio_conf: dict, scan_config: dict, feeder_backer: FeederB
 
 
 def run_pingpong(radio_conf: dict, pingpong_config: dict, feeder_backer: FeederBacker):
+    print("Has serve:", pingpong_config[CFG_PINGPONG_HAS_SERVE])
+    print(f"Delay: {pingpong_config[CFG_PINGPONG_DELAY_US]} us")
     nrf = init_nrf(radio_conf)
     try:
-        pingpong(nrf, feeder_backer, pingpong_config[CFG_PINGPONG_HAS_SERVE])
+        pingpong(nrf, feeder_backer, pingpong_config[CFG_PINGPONG_HAS_SERVE], pingpong_config[CFG_PINGPONG_DELAY_US])
     finally:
         nrf.shutdown()
 
@@ -450,7 +469,7 @@ def probe_nrf(radio_conf: dict, feeder_backer: FeederBacker):
         # poll the irq pin for irq
         start = utime.ticks_ms()
         pin_val = True
-        while pin_val and utime.ticks_diff(utime.ticks_ms(), start) < 50:
+        while pin_val and utime.ticks_diff(utime.ticks_ms(), start) < 100:  # worst case: 4000us * (15 + 1) = 64ms
             pin_val = p.value()
 
         if not pin_val:
@@ -594,6 +613,7 @@ def menu():
     # pingpong dialog
     pingpong_d = Dialog("Ping-pong")
     pingpong_d.add_checkbox("Has serve", CFG_PINGPONG_HAS_SERVE)
+    pingpong_d.add_input("Delay (us)", CFG_PINGPONG_DELAY_US, parser=parse_positive_number)
     pingpong_d.add_action("Run", ACTION_OK)
     pingpong_d.add_action("Cancel", ACTION_CANCEL)
 
