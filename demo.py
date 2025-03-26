@@ -11,7 +11,7 @@ from machine import SPI, Pin
 
 from nrf24l01 import NRF24L01, POWER_0, SPEED_250K, RX_DR
 
-from const import IRQ_PIN
+from const import *
 
 ADDRESS = b'\xe1\xf0\xf0\xf0\xf0'
 CHANNEL = const(6)
@@ -39,9 +39,9 @@ def demo():
         utime.sleep_ms(150)
 
     irq = Pin(IRQ_PIN, mode=Pin.IN, pull=Pin.PULL_UP)
-    csn = Pin(14, mode=Pin.OUT, value=1)
-    ce = Pin(13, mode=Pin.OUT, value=0)
-    spidev = SPI(1, sck=Pin(10), mosi=Pin(15), miso=Pin(8))
+    csn = Pin(CSN_PIN, mode=Pin.OUT, value=1)
+    ce = Pin(CE_PIN, mode=Pin.OUT, value=0)
+    spidev = SPI(SPI_DEV, sck=Pin(SCK_PIN), mosi=Pin(MOSI_PIN), miso=Pin(MISO_PIN))
     nrf = NRF24L01(spidev, csn, ce, payload_size=1, channel=CHANNEL)
     nrf.set_power_speed(POWER_0, SPEED_250K)
     nrf.set_crc(2)  # 16 bit

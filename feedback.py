@@ -3,9 +3,15 @@ from micropython import const
 
 LED_BUILTIN_PIN = const(25)
 
-LED1_PIN = const(22)
+# proto 3:
+LED1_PIN = const(27)
 LED2_PIN = const(26)
-LED3_PIN = const(27)
+LED3_PIN = const(22)
+
+# proto 1 and 2:
+#LED1_PIN = const(22)
+#LED2_PIN = const(26)
+#LED3_PIN = const(27)
 
 
 class FeederBacker:

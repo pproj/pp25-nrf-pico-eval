@@ -8,7 +8,7 @@ from micropython import const
 
 from machine import Pin, SPI
 
-from const import IRQ_PIN
+from const import *
 from nperf import nperf, DIRECTION_RX, DIRECTION_TX
 
 from transfer import tx_irq, tx_poll, rx_irq, rx_poll
@@ -126,9 +126,9 @@ def print_radio_config(config: dict):
 
 def init_nrf(config: dict) -> nrf24l01.NRF24L01:
     print(" == nrf init ==")
-    csn = Pin(14, mode=Pin.OUT, value=1)
-    ce = Pin(13, mode=Pin.OUT, value=0)
-    spidev = SPI(1, sck=Pin(10), mosi=Pin(15), miso=Pin(8))
+    csn = Pin(CSN_PIN, mode=Pin.OUT, value=1)
+    ce = Pin(CE_PIN, mode=Pin.OUT, value=0)
+    spidev = SPI(SPI_DEV, sck=Pin(SCK_PIN), mosi=Pin(MOSI_PIN), miso=Pin(MISO_PIN))
     print("SPI config:", spidev)
     print("rx addr:", PIPE_ADDRESSES[0])
     print("tx addr:", PIPE_ADDRESSES[1])
@@ -235,7 +235,7 @@ def run_simple_tx(radio_conf: dict, tx_conf: dict, feeder_backer: FeederBacker):
             else:
                 print(f" SEND: FAIL ({err_msg})")
                 last_retr = 0
-                last_status = LAST_STATUS_NO_ACK
+                last_status = LAST_STATUS_HW_FAIL
 
     try:
         fun(nrf, feeder_backer, generator, callback)
