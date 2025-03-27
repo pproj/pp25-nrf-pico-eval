@@ -1,23 +1,35 @@
 from micropython import const
 
+DEVICE_REVISION = const(3)
+LED_BUILTIN_PIN = const(25)
+
 # Proto 3:
-IRQ_PIN = const(20)
+if DEVICE_REVISION == 3:
+    IRQ_PIN = 20
 
-MOSI_PIN = const(19)
-MISO_PIN = const(16)
-SCK_PIN = const(18)
-CSN_PIN = const(21)
-CE_PIN = const(17)
+    MOSI_PIN = 19
+    MISO_PIN = 16
+    SCK_PIN = 18
+    CSN_PIN = 21
+    CE_PIN = 17
 
-SPI_DEV = const(0)
+    SPI_DEV = 0
 
-# Proto 1 and 2:
-# IRQ_PIN = const(7)
-#
-# MOSI_PIN = const(15)
-# MISO_PIN = const(8)
-# SCK_PIN = const(10)
-# CSN_PIN = const(14)
-# CE_PIN = const(13)
-#
-# SPI_DEV = const(1)
+    LED1_PIN = 27
+    LED2_PIN = 26
+    LED3_PIN = 22
+
+else:
+    IRQ_PIN = 7
+
+    MOSI_PIN = 15
+    MISO_PIN = 8
+    SCK_PIN = 10
+    CSN_PIN = 14
+    CE_PIN = 13
+
+    SPI_DEV = 1
+
+    LED1_PIN = 22
+    LED2_PIN = 26
+    LED3_PIN = 27

@@ -2,10 +2,12 @@ import select
 import sys
 from interactive import menu, default_rx, default_tx
 from demo import demo
+from const import DEVICE_REVISION
 
 
 def main():
     print("")
+    print(f" == NRF + Pico proto 0{DEVICE_REVISION}; FW ver 0.2 == ")
     print("Press the any key to drop to REPL")
     print("Starting demo mode in 20 seconds")
 

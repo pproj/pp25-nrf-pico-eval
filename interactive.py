@@ -1,4 +1,5 @@
 import sys
+
 import ustruct as struct
 import utime
 
@@ -79,6 +80,12 @@ CFG_NPERF_DIRECTION = const(1)
 
 DEFAULT_NPERF_CONFIG = {
     CFG_NPERF_DIRECTION: DIRECTION_RX,
+}
+
+CFG_DEBUG_INTERRUPT_STACKTRACE = const(1)
+
+DEFAULT_DEBUG_CONFIG = {
+    CFG_DEBUG_INTERRUPT_STACKTRACE: False,
 }
 
 LAST_STATUS_OK = const(0)
@@ -510,11 +517,25 @@ def menu():
 
     feeder_backer = FeederBacker()
 
+    header_template = f"""  == NRF + Pico proto 0{DEVICE_REVISION}; FW ver 0.2 == 
+  == Interactive mode ==
+
+{{}}"""
+
+    radio_config = DEFAULT_RADIO_CONFIG.copy()
+    rx_config = DEFAULT_RX_CONFIG.copy()
+    tx_config = DEFAULT_TX_CONFIG.copy()
+    scan_config = DEFAULT_SCAN_CONFIG.copy()
+    pingpong_config = DEFAULT_PINGPONG_CONFIG.copy()
+    nperf_config = DEFAULT_NPERF_CONFIG.copy()
+    debug_config = DEFAULT_DEBUG_CONFIG.copy()
+
     def protected_run(fn: callable, *args, **kwargs):
         try:
             fn(*args, **kwargs)
         except KeyboardInterrupt as e:
-            sys.print_exception(e)
+            if debug_config[CFG_DEBUG_INTERRUPT_STACKTRACE]:
+                sys.print_exception(e)
             print("\nInterrupted. Hit return.")
         except Exception as e:
             sys.print_exception(e)
@@ -548,7 +569,7 @@ def menu():
     ACTION_CANCEL = const(-2)
 
     # radio config dialog
-    config_d = Dialog("Radio config")
+    config_d = Dialog(header_template.format("Radio config"))
     config_d.add_input("Channel", CFG_RADIO_CHANNEL, parse_channel)
     config_d.add_choice("Speed", CFG_RADIO_SPEED,
                         [(nrf24l01.SPEED_250K, "256K"), (nrf24l01.SPEED_1M, "1M"), (nrf24l01.SPEED_2M, "2M")])
@@ -582,21 +603,21 @@ def menu():
     config_d.add_action("Discard", ACTION_CANCEL)
 
     # receiver dialog
-    rx_d = Dialog("Simple receiver")
+    rx_d = Dialog(header_template.format("Simple receiver"))
     rx_d.add_checkbox("Bell on RX", CFG_RX_BELL)
     rx_d.add_choice("Dev events", CFG_RX_IRQ, [(True, "IRQ"), (False, "POLL")])
     rx_d.add_action("Run", ACTION_OK)
     rx_d.add_action("Cancel", ACTION_CANCEL)
 
     # transmitter dialog
-    tx_d = Dialog("Simple transmitter")
+    tx_d = Dialog(header_template.format("Simple transmitter"))
     tx_d.add_choice("Dev events", CFG_TX_IRQ, [(True, "IRQ"), (False, "POLL")])
     tx_d.add_input("Send interval", CFG_TX_INTERVAL, parse_positive_number)
     tx_d.add_action("Run", ACTION_OK)
     tx_d.add_action("Cancel", ACTION_CANCEL)
 
     # scan dialog
-    scan_d = Dialog("Scan channels and measure available air-time")
+    scan_d = Dialog(header_template.format("Scan channels and measure available air-time"))
     scan_d.add_input("Iterations", CFG_SCAN_ITERATIONS, parse_positive_number)
     scan_d.add_input("Interval", CFG_SCAN_INTERVAL, parse_positive_number)
     scan_d.add_input("Start channel", CFG_SCAN_START, parse_positive_number)
@@ -611,14 +632,14 @@ def menu():
     scan_d.add_action("Cancel", ACTION_CANCEL)
 
     # pingpong dialog
-    pingpong_d = Dialog("Ping-pong")
+    pingpong_d = Dialog(header_template.format("Ping-pong"))
     pingpong_d.add_checkbox("Has serve", CFG_PINGPONG_HAS_SERVE)
     pingpong_d.add_input("Delay (us)", CFG_PINGPONG_DELAY_US, parser=parse_positive_number)
     pingpong_d.add_action("Run", ACTION_OK)
     pingpong_d.add_action("Cancel", ACTION_CANCEL)
 
     # nperf dialog
-    nperf_d = Dialog("nPerf")
+    nperf_d = Dialog(header_template.format("nPerf, the nRF performance meter"))
     nperf_d.add_choice("Direction", CFG_NPERF_DIRECTION, [
         (DIRECTION_TX, "send"),
         (DIRECTION_RX, "recv")
@@ -626,12 +647,10 @@ def menu():
     nperf_d.add_action("Run", ACTION_OK)
     nperf_d.add_action("Cancel", ACTION_CANCEL)
 
-    radio_config = DEFAULT_RADIO_CONFIG.copy()
-    rx_config = DEFAULT_RX_CONFIG.copy()
-    tx_config = DEFAULT_TX_CONFIG.copy()
-    scan_config = DEFAULT_SCAN_CONFIG.copy()
-    pingpong_config = DEFAULT_PINGPONG_CONFIG.copy()
-    nperf_config = DEFAULT_NPERF_CONFIG.copy()
+    debug_d = Dialog(header_template.format("Debug options"))
+    debug_d.add_checkbox("Print stacktrace on interrupt", CFG_DEBUG_INTERRUPT_STACKTRACE)
+    debug_d.add_action("Save", ACTION_OK)
+    debug_d.add_action("Discard", ACTION_CANCEL)
 
     def action_config():
         nonlocal radio_config
@@ -680,6 +699,13 @@ def menu():
             nperf_config = new_nperf_config
             protected_run(run_nperf, radio_config, nperf_config, feeder_backer)
 
+    def action_debug_options():
+        nonlocal debug_config
+        new_debug_config = debug_d.present(debug_config)
+        if ACTION_OK in new_debug_config:
+            del new_debug_config[ACTION_OK]
+            debug_config = new_debug_config
+
     applets = [
         # name, function, protected
         (
@@ -717,11 +743,14 @@ def menu():
         ),
         (
             "Run LED test", lambda: led_test(feeder_backer), True
+        ),
+        (
+            "Debug options", action_debug_options, False
         )
     ]
 
     # main dialog
-    main_d = Dialog("Where do you want to go today?")
+    main_d = Dialog(header_template.format("Where do you want to go today?"))
 
     for i, elm in enumerate(applets):
         main_d.add_action(elm[0], i)
@@ -740,7 +769,7 @@ def menu():
         choice = list(result.keys())[0]
 
         if choice == ACTION_CANCEL:
-            # user choose to exit
+            # user chooses to exit
             break
 
         _, func, protect = applets[choice]

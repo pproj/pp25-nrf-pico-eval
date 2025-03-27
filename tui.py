@@ -27,6 +27,7 @@ class Dialog:
 
     def __init__(self, title: str):
         self._title = title
+        self._draw_start = title.count("\n") + 2 # one line bellow the title
         self._items = []
 
         self._selected = 0
@@ -64,12 +65,6 @@ class Dialog:
             self.KEY_INPUT_PARSER: parser
         })
 
-    def _header(self):
-        print("\033[2J\033[0;0H", end="")  # clear screen # goto 0,0
-        print("  == NRF + Pico proto 01; FW ver 0.1 == ")
-        print("  == Interactive mode == ")
-        print()
-
     def present(self, options: dict = None) -> dict:
         # validate
         if len(self._items) == 0:
@@ -98,7 +93,7 @@ class Dialog:
 
         # print permanent stuff
         print("\x1b[?25l", end="")  # turn off cursor
-        self._header()
+        print("\033[2J\033[0;0H", end="")  # clear screen # goto 0,0
         print(self._title)
 
         for _ in self._items:
@@ -117,7 +112,7 @@ class Dialog:
                     break
 
                 if key == self.KEY_REDRAW:
-                    self._header()
+                    print("\033[2J\033[0;0H", end="")  # clear screen # goto 0,0
                     print(self._title)
                     break
 
@@ -140,7 +135,7 @@ class Dialog:
         return idx
 
     def _redraw(self):
-        print("\033[5;0H", end="")  # move bellow the title
+        print(f"\033[{self._draw_start};0H", end="")  # move bellow the title
         for idx, item in enumerate(self._items):
             print("\033[K\r", end="")  # clear line
             if self._selected == idx:
@@ -301,7 +296,7 @@ class Dialog:
                 self._result[result_key] = user_input
 
             # TODO: this is a hack, should handle screen lifecycle better
-            self._header()
+            print("\033[2J\033[0;0H", end="")  # clear screen # goto 0,0
             print(self._title)
 
     def _read_freetext(self, parser: callable = None) -> any:

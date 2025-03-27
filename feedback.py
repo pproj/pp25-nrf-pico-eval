@@ -1,17 +1,6 @@
 from machine import Pin
 from micropython import const
-
-LED_BUILTIN_PIN = const(25)
-
-# proto 3:
-LED1_PIN = const(27)
-LED2_PIN = const(26)
-LED3_PIN = const(22)
-
-# proto 1 and 2:
-#LED1_PIN = const(22)
-#LED2_PIN = const(26)
-#LED3_PIN = const(27)
+from const import *
 
 
 class FeederBacker:
