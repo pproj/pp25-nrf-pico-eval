@@ -1,4 +1,5 @@
 """NRF24L01 driver for MicroPython
+Enhanced by Marcsello
 """
 
 from micropython import const
