@@ -5,7 +5,6 @@ import utime
 
 from feedback import FeederBacker
 import nrf24l01
-from micropython import const
 
 from machine import Pin, SPI
 

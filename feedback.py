@@ -1,5 +1,4 @@
 from machine import Pin
-from micropython import const
 from const import *
 
 
